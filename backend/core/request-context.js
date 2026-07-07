@@ -7,7 +7,11 @@ export function getClientIp(req) {
 }
 
 export function createRequestContext(req, params) {
-  const path = (params?.path || []).join('/');
+  const paramPath = params?.path;
+  const pathFromParams = Array.isArray(paramPath) ? paramPath.join('/') : paramPath || '';
+  const urlPath = req.nextUrl?.pathname || new URL(req.url).pathname;
+  const pathFromUrl = urlPath.replace(/^\/api\/?/, '').replace(/^\/+|\/+$/g, '');
+  const path = pathFromParams || pathFromUrl;
   const method = req.method;
   const requestId = req.headers.get('x-request-id') || crypto.randomUUID();
   return {
