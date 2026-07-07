@@ -1,10 +1,24 @@
 'use client';
-import Link from 'next/link';
+import { PRODUCTS } from '@/lib/products';
 import { motion } from 'framer-motion';
 import { ArrowUpRight, Lock } from 'lucide-react';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import Product3D from './Product3D';
 
 export default function ProductCard({ product, index = 0 }) {
+  const fallbackImage = PRODUCTS[0]?.image || '';
+  const [imageSrc, setImageSrc] = useState(product.image || fallbackImage);
+
+  useEffect(() => {
+    setImageSrc(product.image || fallbackImage);
+  }, [product.image, fallbackImage]);
+
+  const handleImageError = () => {
+    if (imageSrc !== fallbackImage) {
+      setImageSrc(fallbackImage);
+    }
+  };
   return (
     <motion.div
       initial={{ opacity: 0, y: 40 }}
@@ -17,7 +31,7 @@ export default function ProductCard({ product, index = 0 }) {
       <Link href={`/products/${product.slug}`} className="block">
         <div className="product-blur relative aspect-[4/5] rounded-3xl overflow-hidden bg-gradient-to-br from-[#0a0a0c] via-[#0f0f12] to-[#050505] border border-white/5 group-hover:border-[#00FF85]/30 transition-all duration-500">
           {/* image bg */}
-          <img src={product.image} alt={product.name} className="absolute inset-0 w-full h-full object-cover" />
+          <img src={imageSrc} alt={product.name} className="absolute inset-0 w-full h-full object-cover" onError={handleImageError} />
           {/* dark overlay */}
           <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/40 to-black/80" />
           {/* grid bg */}

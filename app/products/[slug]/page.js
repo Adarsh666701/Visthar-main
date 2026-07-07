@@ -1,43 +1,88 @@
 'use client';
-import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
-import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, ShoppingBag, Heart, Bell, Zap, Check, Cpu, Battery, Shield, Lock, Box } from 'lucide-react';
-import PageShell from '@/components/visthar/PageShell';
-import { getProduct, PRODUCTS } from '@/lib/products';
-import Link from 'next/link';
-import { toast } from 'sonner';
 import { useCart } from '@/components/visthar/CartContext';
+import PageShell from '@/components/visthar/PageShell';
+import { PRODUCTS } from '@/lib/products';
+import { motion } from 'framer-motion';
+import { ArrowLeft, Battery, Bell, Box, Check, Cpu, Heart, Lock, Shield, ShoppingBag, Zap } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 
 const Product3D = dynamic(() => import('@/components/visthar/Product3D'), { ssr: false, loading: () => null });
 
 export default function ProductPage() {
   const params = useParams();
   const router = useRouter();
-  const [product, setProduct] = useState(() => getProduct(params.slug));
+  const [product, setProduct] = useState(null);
   const [products, setProducts] = useState(PRODUCTS);
   const { add } = useCart() || {};
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [show3D, setShow3D] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const fallbackImage = PRODUCTS[0]?.image || '';
 
   useEffect(() => {
-    fetch(`/api/products/${params.slug}`)
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => {
-        if (data?.product) setProduct(data.product);
-      })
-      .catch(() => {});
+    let isMounted = true;
+    const slug = params?.slug;
 
-    fetch('/api/products')
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => {
-        if (data?.products?.length) setProducts(data.products);
-      })
-      .catch(() => {});
+    const loadProduct = async () => {
+      if (!slug) {
+        if (isMounted) setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+
+      try {
+        const listRes = await fetch('/api/products', { cache: 'no-store' });
+        const listData = await listRes.json();
+        if (isMounted && Array.isArray(listData?.products)) {
+          setProducts(listData.products);
+          const matched = listData.products.find((item) => item.slug === slug);
+          if (matched) {
+            setProduct(matched);
+            setLoading(false);
+            return;
+          }
+        }
+
+        const detailRes = await fetch(`/api/products/${encodeURIComponent(String(slug))}`, { cache: 'no-store' });
+        const detailData = await detailRes.json();
+
+        if (isMounted) {
+          if (detailData?.product) {
+            setProduct(detailData.product);
+          } else {
+            const fallback = PRODUCTS.find((item) => item.slug === slug) || null;
+            setProduct(fallback);
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setProduct(PRODUCTS.find((item) => item.slug === slug) || null);
+        }
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    loadProduct();
+    return () => {
+      isMounted = false;
+    };
   }, [params.slug]);
+
+  const handleImageError = (event) => {
+    if (event.currentTarget.src !== fallbackImage) {
+      event.currentTarget.src = fallbackImage;
+    }
+  };
+
+  if (loading) return <PageShell><div className="min-h-screen flex items-center justify-center text-white">Loading product...</div></PageShell>;
 
   if (!product) return <PageShell><div className="min-h-screen flex items-center justify-center text-white">Product not found. <Link href="/products" className="text-[#00FF85] ml-2">Back</Link></div></PageShell>;
 
@@ -68,7 +113,7 @@ export default function ProductPage() {
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 1 }} className="relative aspect-square rounded-3xl overflow-hidden border border-white/10 bg-gradient-to-br from-[#0a0a0c] to-[#020202]">
               {/* blurred image as background texture */}
               <div className="absolute inset-0 product-blur-strong pointer-events-none opacity-50">
-                <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                <img src={product.image || fallbackImage} alt={product.name} className="w-full h-full object-cover" onError={handleImageError} />
                 <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/70" />
               </div>
               {/* 3D scene on top */}
@@ -153,7 +198,7 @@ export default function ProductPage() {
           <div className="grid md:grid-cols-3 gap-6">
             {related.map(p => (
               <Link key={p.slug} href={`/products/${p.slug}`} className="product-blur block aspect-[4/5] rounded-3xl overflow-hidden border border-white/5 hover:border-[#00FF85]/30 transition relative">
-                <img src={p.image} className="w-full h-full object-cover" alt={p.name} />
+                <img src={p.image || fallbackImage} className="w-full h-full object-cover" alt={p.name} onError={handleImageError} />
                 <div className="absolute inset-0 bg-gradient-to-b from-black/30 to-black/80" />
                 <div className="absolute bottom-6 left-6">
                   <div className="text-[10px] text-[#00FF85] tracking-[0.3em] uppercase mb-1">{p.status}</div>
