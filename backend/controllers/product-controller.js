@@ -1,7 +1,7 @@
 import { jsonResponse } from '../core/response';
 import { loadProductsWithFallback, loadProductWithFallback } from '../../lib/inventory-products';
 
-export async function handleProductRoute(db, ctx) {
+export async function handleProductRoute(req, db, ctx) {
   const { method, path } = ctx;
   if (method !== 'GET') return null;
 
