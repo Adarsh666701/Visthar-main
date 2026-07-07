@@ -6,8 +6,27 @@ import PageShell from '@/components/visthar/PageShell';
 import { motion } from 'framer-motion';
 import { Check, CreditCard, Lock, ShieldCheck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+
+let stripeScriptPromise;
+
+function loadStripeScript() {
+  if (typeof window === 'undefined') return Promise.reject(new Error('Stripe is unavailable'));
+  if (window.Stripe) return Promise.resolve(window.Stripe);
+  if (stripeScriptPromise) return stripeScriptPromise;
+
+  stripeScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://js.stripe.com/v3/';
+    script.async = true;
+    script.onload = () => resolve(window.Stripe);
+    script.onerror = () => reject(new Error('Unable to load Stripe'));
+    document.head.appendChild(script);
+  });
+
+  return stripeScriptPromise;
+}
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -16,34 +35,136 @@ export default function CheckoutPage() {
   const [shipping, setShipping] = useState({ name: '', email: '', phone: '', address: '', city: '', state: '', pincode: '' });
   const [processing, setProcessing] = useState(false);
   const [success, setSuccess] = useState(null);
+  const [paymentIntentId, setPaymentIntentId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [publishableKey, setPublishableKey] = useState('');
+  const [mockedPayment, setMockedPayment] = useState(false);
+  const [paymentReady, setPaymentReady] = useState(false);
+  const stripeRef = useRef(null);
+  const elementsRef = useRef(null);
+  const paymentElementRef = useRef(null);
+  const cartSignature = useMemo(
+    () => JSON.stringify(items.map((item) => [item.slug, item.qty])),
+    [items]
+  );
 
   useEffect(() => {
     if (!loading && !user) router.push('/login?next=/checkout');
   }, [loading, user, router]);
   useEffect(() => { if (user) setShipping(s => ({ ...s, name: user.name || '', email: user.email })); }, [user]);
+  useEffect(() => {
+    setPaymentIntentId('');
+    setClientSecret('');
+    setPublishableKey('');
+    setMockedPayment(false);
+    setPaymentReady(false);
+    stripeRef.current = null;
+    elementsRef.current = null;
+    if (paymentElementRef.current) paymentElementRef.current.innerHTML = '';
+  }, [cartSignature]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function mountStripeElement() {
+      if (!clientSecret || !publishableKey || mockedPayment || !paymentElementRef.current) return;
+      setPaymentReady(false);
+
+      try {
+        const Stripe = await loadStripeScript();
+        if (cancelled) return;
+
+        const stripe = Stripe(publishableKey);
+        const elements = stripe.elements({
+          clientSecret,
+          appearance: {
+            theme: 'night',
+            variables: {
+              colorPrimary: '#00FF85',
+              colorBackground: '#050505',
+              colorText: '#ffffff',
+              borderRadius: '12px',
+            },
+          },
+        });
+        const paymentElement = elements.create('payment');
+        paymentElementRef.current.innerHTML = '';
+        paymentElement.mount(paymentElementRef.current);
+
+        stripeRef.current = stripe;
+        elementsRef.current = elements;
+        setPaymentReady(true);
+      } catch (error) {
+        toast.error(error.message || 'Unable to load Stripe');
+      }
+    }
+
+    mountStripeElement();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientSecret, publishableKey, mockedPayment]);
 
   const placeOrder = async (e) => {
     e.preventDefault();
     if (items.length === 0) return toast.error('Cart is empty');
     setProcessing(true);
     try {
-      const intentRes = await fetch('/api/payments/create-intent', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, shipping }),
-      });
-      const intentData = await intentRes.json();
-      if (!intentRes.ok) throw new Error(intentData.error || 'Unable to initialize payment');
+      let confirmedPaymentIntentId = paymentIntentId;
+      let isMockedPayment = mockedPayment;
 
-      // Stripe client-side confirmation (Elements) can be added here.
-      const paymentIntentId = intentData?.payment?.paymentIntentId;
+      if (!clientSecret || !paymentIntentId) {
+        const intentRes = await fetch('/api/payments/create-intent', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items, shipping }),
+        });
+        const intentData = await intentRes.json();
+        if (!intentRes.ok) throw new Error(intentData.error || 'Unable to initialize payment');
+
+        const payment = intentData?.payment || {};
+        setPaymentIntentId(payment.paymentIntentId || '');
+        setClientSecret(payment.clientSecret || '');
+        setPublishableKey(payment.publishableKey || '');
+        setMockedPayment(Boolean(payment.mocked));
+        isMockedPayment = Boolean(payment.mocked);
+
+        if (!payment.mocked) {
+          toast.message('Enter payment details to complete checkout');
+          setProcessing(false);
+          return;
+        }
+
+        confirmedPaymentIntentId = payment.paymentIntentId;
+      }
+
+      if (!isMockedPayment) {
+        if (!stripeRef.current || !elementsRef.current || !paymentReady) {
+          throw new Error('Payment form is still loading');
+        }
+
+        const { error, paymentIntent } = await stripeRef.current.confirmPayment({
+          elements: elementsRef.current,
+          redirect: 'if_required',
+          confirmParams: {
+            receipt_email: shipping.email,
+          },
+        });
+
+        if (error) throw new Error(error.message || 'Payment failed');
+        if (paymentIntent?.status !== 'succeeded') {
+          throw new Error(`Payment ${paymentIntent?.status || 'was not completed'}`);
+        }
+
+        confirmedPaymentIntentId = paymentIntent.id;
+      }
 
       const res = await fetch('/api/orders', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shipping, paymentProvider: 'stripe', paymentIntentId }),
+        body: JSON.stringify({ shipping, paymentProvider: 'stripe', paymentIntentId: confirmedPaymentIntentId }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -117,6 +238,11 @@ export default function CheckoutPage() {
                     <div className="text-white/40 text-[11px]">Secure 256-bit encrypted checkout</div>
                   </div>
                 </div>
+                {clientSecret && !mockedPayment && (
+                  <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-4">
+                    <div ref={paymentElementRef} />
+                  </div>
+                )}
               </div>
             </div>
             <div className="glass rounded-2xl p-6 h-fit sticky top-28">
@@ -127,7 +253,7 @@ export default function CheckoutPage() {
                 ))}
               </div>
               <div className="flex justify-between mt-4 mb-6"><span className="text-white">Total</span><span className="text-2xl font-light text-gradient-neon">₹{total.toLocaleString('en-IN')}</span></div>
-              <button disabled={processing || items.length === 0} className="w-full px-6 py-4 rounded-full bg-[#00FF85] text-black text-sm font-medium hover:shadow-[0_0_30px_rgba(0,255,133,0.5)] transition disabled:opacity-50 flex items-center justify-center gap-2">{processing ? 'Processing...' : <><Lock size={13}/> Pay ₹{total.toLocaleString('en-IN')}</>}</button>
+              <button disabled={processing || items.length === 0} className="w-full px-6 py-4 rounded-full bg-[#00FF85] text-black text-sm font-medium hover:shadow-[0_0_30px_rgba(0,255,133,0.5)] transition disabled:opacity-50 flex items-center justify-center gap-2">{processing ? 'Processing...' : <><Lock size={13}/> {clientSecret && !mockedPayment ? 'Complete Payment' : `Pay ₹${total.toLocaleString('en-IN')}`}</>}</button>
             </div>
           </form>
         </div>
