@@ -205,7 +205,3 @@ export default function SignupPage() {
     </PageShell>
   );
 }
-      </section>
-    </PageShell>
-  );
-}

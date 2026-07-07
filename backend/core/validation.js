@@ -90,57 +90,6 @@ export const schemas = {
     shipping: shippingSchema.optional(),
   }),
 };
-  siteSettings: z.object({
-    email: optionalText(254),
-    phone: optionalText(32),
-    address: optionalText(160),
-    hq: optionalText(160),
-    instagram: optionalText(160),
-    twitter: optionalText(160),
-    youtube: optionalText(160),
-    linkedin: optionalText(160),
-    company: optionalText(160),
-  }),
-  prebook: z.object({
-    email: emailSchema,
-    productSlug: requiredText(120),
-    name: optionalText(80),
-    phone: optionalText(32),
-  }),
-  notify: z.object({
-    email: emailSchema,
-    productSlug: requiredText(120),
-  }),
-  newsletter: z.object({
-    email: emailSchema,
-  }),
-  contact: z.object({
-    email: emailSchema,
-    message: requiredText(5000),
-    name: optionalText(80),
-    subject: optionalText(160),
-  }),
-  oem: z.object({
-    email: emailSchema,
-    company: requiredText(160),
-    name: optionalText(80),
-    phone: optionalText(32),
-    volume: optionalText(64),
-    message: optionalText(5000),
-  }),
-  cart: z.object({
-    items: z.array(z.unknown()).max(200).optional(),
-  }),
-  order: z.object({
-    paymentIntentId: z.string().trim().min(1).max(200),
-    paymentProvider: z.enum(['stripe']),
-    shipping: shippingSchema,
-  }),
-  paymentIntentCreate: z.object({
-    items: z.array(cartItemSchema).min(1).max(200),
-    shipping: shippingSchema.optional(),
-  }),
-};
 
 export async function parseBody(req, schema) {
   try {
